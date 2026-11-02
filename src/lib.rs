@@ -3,8 +3,8 @@
 //! A string is a `u8` length followed by its bytes, or `0xFF` followed by a little-endian `u32`
 //! length for strings of 255 bytes or more. A count is a little-endian `u32`.
 //!
-//! [`Writer`] copies short strings without calling `memcpy`, and [`Reader`] skips full UTF-8
-//! validation for ASCII strings. [`Reader`] never panics, even on truncated or corrupted input.
+//! [`Writer`] copies strings of 4 to 64 bytes without calling `memcpy`, and [`Reader`] skips full
+//! UTF-8 validation for ASCII strings. [`Reader`] never panics, even on truncated or corrupted input.
 
 use std::{ptr, str};
 
@@ -46,26 +46,34 @@ impl Writer {
     #[inline(always)]
     pub fn write_str(&mut self, s: &str) {
         let len = s.len();
-        self.bytes.reserve(5 + len);
+        let len_len = if len < LONG_LEN as usize {
+            1
+        } else {
+            assert!(u32::try_from(len).is_ok(), "strpack strings must be shorter than 4 GiB");
+            5
+        };
+        self.bytes.reserve(len_len + len);
         let start = self.bytes.len();
-        // SAFETY: we reserved 5 bytes for the length plus `len` bytes for the string after `start`,
-        // and each copy stays within `s` and those bytes.
+        // SAFETY: we reserved `len_len + len` bytes after `start`, and each copy stays within `s` and those bytes.
         unsafe {
             let dst = self.bytes.as_mut_ptr().add(start);
-            let len_len = if len < LONG_LEN as usize {
+            if len_len == 1 {
                 *dst = len as u8;
-                1
             } else {
                 *dst = LONG_LEN;
-                let long_len = u32::try_from(len).expect("strpack strings must be shorter than 4 GiB");
-                dst.add(1).cast::<[u8; 4]>().write_unaligned(long_len.to_le_bytes());
-                5
-            };
+                dst.add(1).cast::<[u8; 4]>().write_unaligned((len as u32).to_le_bytes());
+            }
             let (src, dst) = (s.as_ptr(), dst.add(len_len));
             match len {
                 8..16 => copy_overlapping::<8>(src, dst, len),
                 16..32 => copy_overlapping::<16>(src, dst, len),
-                32..=64 => copy_overlapping::<32>(src, dst, len),
+                // 32-byte copies aren't inlined on targets without SIMD (like 32-bit ARM Android),
+                // so we copy the first and last 32 bytes with 16-byte copies instead.
+                32..=64 => {
+                    copy_overlapping::<16>(src, dst, 32);
+                    copy_overlapping::<16>(src.add(len - 32), dst.add(len - 32), 32);
+                }
+                4..8 => copy_overlapping::<4>(src, dst, len),
                 _ => ptr::copy_nonoverlapping(src, dst, len),
             }
             self.bytes.set_len(start + len_len + len);
