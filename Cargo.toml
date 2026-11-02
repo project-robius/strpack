@@ -1,0 +1,19 @@
+[package]
+name = "strpack"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = [
+    "Kevin Boos <kevinaboos@gmail.com>",
+    "Project Robius Maintainers",
+]
+description = "A tiny, fast, dependency-free binary encoding for strings and counts"
+documentation = "https://docs.rs/strpack"
+homepage = "https://robius.rs/"
+keywords = ["binary", "encoding", "serialization", "strings", "robius"]
+categories = ["encoding", "parsing"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/project-robius/strpack"
+
+[dependencies]
